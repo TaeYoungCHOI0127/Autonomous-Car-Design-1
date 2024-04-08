@@ -1,0 +1,73 @@
+#define MAX_DISTANCE 200
+
+// 전역 변수
+int mode = -1;  // 로봇 모드를 저장하는 변수
+int UltrasonicSensorData[4];  // 초음파 센서 데이터를 저장하는 배열
+
+// 함수 선언
+void Sonar_Data_Display(int flag);  // 초음파 센서 데이터를 출력하는 함수 선언
+void Robot_Mode_Define(void);  // 로봇 모드를 정의하는 함수 선언
+
+void setup() {
+  Serial.begin(9600); // 시리얼 통신 초기화
+}
+
+void loop() {
+  // 메인 코드 실행
+  Robot_Mode_Define();  // 로봇 모드를 정의하는 함수 호출
+  Serial.println(mode);  // 현재 모드를 시리얼 모니터에 출력
+
+  // wall_following_c(12); // 필요한 경우 주석 해제
+}
+
+// 초음파 센서 데이터 출력 함수
+void Sonar_Data_Display(int flag) {
+  char Sonar_data_display[40];  // 문자열을 저장할 버퍼
+  if (flag == 0) return;  // flag가 0이면 함수 종료
+  else {
+    // 서식화된 문자열 생성
+    sprintf(Sonar_data_display, "F:");
+    Serial.print(Sonar_data_display);
+    Serial.print(UltrasonicSensorData[0]);
+    Serial.print("cm B:");
+    Serial.print(UltrasonicSensorData[1]);
+    Serial.print("cm R:");
+    Serial.print(UltrasonicSensorData[2]);
+    Serial.print("cm L:");
+    // 왼쪽 센서 데이터가 200을 초과하는 경우 200으로 제한
+    if (UltrasonicSensorData[3] > MAX_DISTANCE) {
+      Serial.print(MAX_DISTANCE);
+    } else {
+      Serial.print(UltrasonicSensorData[3]);
+    }
+    Serial.println("cm"); // 왼쪽 센서의 값 출력 후 "cm" 단위 추가
+  }
+}
+
+// 로봇 모드 정의 함수
+void Robot_Mode_Define(void) {
+  int i;
+  // 초음파 센서 데이터 읽기
+  // read_ulreasonic_sensor(); // 필요한 경우 호출
+  for (i = 0; i < 4; i++) {
+    if (UltrasonicSensorData[i] == 0) UltrasonicSensorData[i] = MAX_DISTANCE;
+  }
+  Sonar_Data_Display(1);  // 초음파 센서 데이터 출력
+
+  // mode == 0
+  if ((UltrasonicSensorData[2] >= 15) && (UltrasonicSensorData[3] >= 15)) {
+    mode = 0;
+  }
+  // mode == 1
+  if ((UltrasonicSensorData[2] <= 15) && (UltrasonicSensorData[3] <= 15)) {
+    mode = 1;
+  }
+  // mode == 2
+  if ((UltrasonicSensorData[3] <= 35) && (UltrasonicSensorData[2] >= 40)) {
+    mode = 2;
+  }
+  // mode == 3
+  if ((UltrasonicSensorData[2] <= 35) && (UltrasonicSensorData[3] >= 40)) {
+    mode = 3;
+  }
+}
