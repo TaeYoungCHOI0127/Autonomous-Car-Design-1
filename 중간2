@@ -1,0 +1,228 @@
+#include <Wire.h>
+#include <LSM303.h>
+#include <NewPing.h>
+
+#define SONAR_NUM 3      // 초음파 센서 개수
+#define MAX_DISTANCE 150 // 초음파 최대 거리 (센티미터)
+#define WALL_GAP_DISTANCE 300  // 벽 간격 거리 (밀리미터)
+#define WALL_GAP_DISTANCE_HALF 150 // 벽 간격 거리의 반 (밀리미터)
+#define MOTOR_PWM_OFFSET 10 // 모터 PWM 오프셋
+
+#define Front 0 // 앞
+#define Left 1  // 왼쪽
+#define Right 2 // 오른쪽
+
+#define TRIG1 50 // 초음파 센서 1번 Trig 핀 번호 (앞)
+#define ECHO1 51 // 초음파 센서 1번 Echo 핀 번호
+
+#define TRIG2 46 // 초음파 센서 2번 Trig 핀 번호 (왼쪽)
+#define ECHO2 47 // 초음파 센서 2번 Echo 핀 번호
+
+#define TRIG3 22 // 초음파 센서 3번 Trig 핀 번호 (오른쪽)
+#define ECHO3 23 // 초음파 센서 3번 Echo 핀 번호
+
+#define ENA 13  // 모터 A의 PWM 핀
+#define IN1 11  // 모터 A의 IN1 핀
+#define IN2 10  // 모터 A의 IN2 핀
+#define IN3 9   // 모터 B의 IN3 핀
+#define IN4 8   // 모터 B의 IN4 핀
+#define ENB 12  // 모터 B의 PWM 핀
+
+LSM303 compass;  // 전자 나침반
+NewPing sonar[SONAR_NUM] = {  // 초음파 센서 배열
+    NewPing(TRIG1, ECHO1, MAX_DISTANCE),
+    NewPing(TRIG2, ECHO2, MAX_DISTANCE),
+    NewPing(TRIG3, ECHO3, MAX_DISTANCE)
+};
+
+float front_sonar = 0.0;  // 앞 초음파 센서 거리
+float left_sonar = 0.0;   // 왼쪽 초음파 센서 거리
+float right_sonar = 0.0;  // 오른쪽 초음파 센서 거리
+float heading = 0.0;  // 현재 방향
+float target_heading_angle = 0.0;  // 목표 방향
+
+int flag = 0;  // 상태 플래그
+
+void setup() 
+{
+    Wire.begin();
+    compass.init();
+    compass.enableDefault();
+    flag = 0;
+
+    pinMode(TRIG1, OUTPUT);
+    pinMode(ECHO1, INPUT);
+    pinMode(TRIG2, OUTPUT);
+    pinMode(ECHO2, INPUT);
+    pinMode(TRIG3, OUTPUT);
+    pinMode(ECHO3, INPUT);
+  
+    pinMode(ENA, OUTPUT);
+    pinMode(IN1, OUTPUT);
+    pinMode(IN2, OUTPUT);
+    pinMode(IN3, OUTPUT);
+    pinMode(IN4, OUTPUT);
+    pinMode(ENB, OUTPUT);
+  
+    Serial.begin(9600);
+}
+
+void motor_A_control(int direction, int speed) 
+{
+    if (direction == HIGH) 
+    {
+        digitalWrite(IN1, HIGH);
+        digitalWrite(IN2, LOW);
+    } 
+    else 
+    {
+        digitalWrite(IN1, LOW);
+        digitalWrite(IN2, HIGH);
+    }
+    analogWrite(ENA, speed);
+}
+
+void motor_B_control(int direction, int speed) 
+{
+    if (direction == HIGH) 
+    {
+        digitalWrite(IN3, LOW);
+        digitalWrite(IN4, HIGH);
+    } 
+    else 
+    {
+        digitalWrite(IN3, HIGH);
+        digitalWrite(IN4, LOW);
+    }
+    analogWrite(ENB, speed);
+}
+
+void imu_rotation(float target_angle, bool clockwise) 
+{
+    target_heading_angle = fmod(target_angle + 360, 360);
+    do 
+    {
+        compass.read();
+        heading = fmod(compass.heading(), 360);
+
+        if (clockwise) 
+        {
+            motor_A_control(HIGH, 250);
+            motor_B_control(LOW, 250);
+        } 
+        else 
+        {
+            motor_A_control(LOW, 250);
+            motor_B_control(HIGH, 250);
+        }
+    } 
+    while ((clockwise && heading < target_heading_angle) || (!clockwise && heading > target_heading_angle));
+
+    motor_A_control(HIGH, 0);
+    motor_B_control(HIGH, 0);
+}
+
+void wall_following(int base_speed_left, int base_speed_right) 
+{
+    float error = (right_sonar - left_sonar) * 1.2;
+    error = constrain(error, -50, 50);
+  
+    int right_pwm = constrain(base_speed_right - error, 0, 255);
+    int left_pwm = constrain(base_speed_left + error, 0, 255);
+
+    motor_A_control(HIGH, right_pwm);
+    motor_B_control(HIGH, left_pwm);
+}
+
+void move_forward(int base_speed_left, int base_speed_right)
+{
+    motor_A_control(HIGH, base_speed_right);
+    motor_B_control(HIGH, base_speed_left);
+}
+
+void loop() 
+{
+    front_sonar = sonar[Front].ping_cm() * 8;
+    left_sonar = sonar[Left].ping_cm() * 8;
+    right_sonar = sonar[Right].ping_cm() * 8;
+
+    if (front_sonar == 0.0) front_sonar = MAX_DISTANCE * 10;
+    if (left_sonar == 0.0) left_sonar = MAX_DISTANCE * 10;
+    if (right_sonar == 0.0) right_sonar = MAX_DISTANCE * 10;
+
+    Serial.print("L: ");
+    Serial.print(left_sonar); 
+    Serial.print(" ");
+    Serial.print("F: "); 
+    Serial.print(front_sonar); 
+    Serial.print(" ");
+    Serial.print("R: "); 
+    Serial.println(right_sonar);
+
+    switch(flag)
+    {
+        case 0:
+            wall_following(200, 300);  // 왼쪽 바퀴 200, 오른쪽 바퀴 300
+            if(left_sonar >= WALL_GAP_DISTANCE) 
+            {
+                compass.read();
+                heading = compass.heading();
+                target_heading_angle = heading - 90;
+                imu_rotation(target_heading_angle, false);
+                flag = 1;
+            }
+            break;
+
+        case 1:
+            move_forward(200, 300);  // 직진
+            if(front_sonar <= WALL_GAP_DISTANCE_HALF) 
+            {
+                compass.read();
+                heading = compass.heading();
+                target_heading_angle = heading + 90;
+                imu_rotation(target_heading_angle, true);
+                flag = 2;
+            }
+            break;
+
+        case 2:
+            move_forward(200, 300);  // 직진
+            if(front_sonar <= WALL_GAP_DISTANCE_HALF) 
+            {
+                compass.read();
+                heading = compass.heading();
+                target_heading_angle = heading + 180;
+                imu_rotation(target_heading_angle, true);
+                flag = 3;
+            }
+            break;
+
+        case 3:
+            wall_following(200, 300);  // 왼쪽 바퀴 200, 오른쪽 바퀴 300
+            if(left_sonar >= WALL_GAP_DISTANCE) 
+            {
+                compass.read();
+                heading = compass.heading();
+                target_heading_angle = heading - 90;
+                imu_rotation(target_heading_angle, false);
+                flag = 4;
+            }
+            break;
+
+        case 4:
+            wall_following(200, 300);  // 왼쪽 바퀴 200, 오른쪽 바퀴 300
+            if(front_sonar <= WALL_GAP_DISTANCE_HALF) 
+            {
+                compass.read();
+                heading = compass.heading();
+                target_heading_angle = heading - 90;
+                imu_rotation(target_heading_angle, false);
+                flag = 5;
+            }
+            break;
+
+        case 5:
+            wall_following(200, 300);  // 왼쪽 바퀴 200, 오른쪽 바퀴 300
+            break;
+    }
+}
